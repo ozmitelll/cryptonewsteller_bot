@@ -96,7 +96,7 @@ async def fetch_latest_articles():
                 data = await resp.text()
                 feed = feedparser.parse(data)
 
-                for entry in feed.entries[:5]:
+                for entry in feed.entries:
                     link = getattr(entry, "link", None)
                     if not link or link in seen:
                         continue

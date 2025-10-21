@@ -1,4 +1,5 @@
 import asyncio
+import random
 from datetime import datetime, time, date
 from news_parser import fetch_latest_articles
 from gpt_client import summarize_article
@@ -7,28 +8,27 @@ from telegram_bot import post_to_telegram
 # --- настройки ---
 ACTIVE_START = time(8, 0)
 ACTIVE_END = time(23, 0)
-CHECK_INTERVAL_MINUTES = 15
+CHECK_INTERVAL_MINUTES = 5
+POST_DELAY_RANGE = (60, 180)  # ⏳ задержка между постами (секунды, случайно)
 
-# глобальный список новостей за день
 daily_titles = []
 last_summary_date = date.today()
 
 
 def is_active_hours() -> bool:
-    """Проверяет, сейчас ли время публикации (между 8:00 и 23:00)."""
+    """Проверяет, сейчас ли активное время публикаций."""
     now = datetime.now().time()
     return ACTIVE_START <= now <= ACTIVE_END
 
 
 async def post_daily_summary():
-    """Публикует в Telegram сводку за день."""
+    """Публикует итоговый пост за день."""
     global daily_titles
 
     if not daily_titles:
         print("📭 За день не было новостей — итог не публикуется.")
         return
 
-    # собираем сообщение
     today_str = datetime.now().strftime("%d.%m.%Y")
     header = f"🗞 <b>Итоги дня ({today_str})</b>\n\n"
     body = "\n".join([f"• {t}" for t in daily_titles])
@@ -40,7 +40,7 @@ async def post_daily_summary():
     except Exception as e:
         print(f"[Summary ERROR] {e}")
 
-    # очищаем список новостей на следующий день
+    # очищаем список после публикации
     daily_titles = []
 
 
@@ -51,26 +51,25 @@ async def main_loop():
         now = datetime.now()
         current_time = now.time()
 
-        # ежедневная проверка: новый день → обнуляем список
+        # новый день — очистка
         if date.today() != last_summary_date:
             print("📅 Новый день — очищаем список новостей.")
             daily_titles = []
             last_summary_date = date.today()
 
-        # если вечер и пора подвести итоги
+        # публикация итогов дня
         if current_time.hour == 23 and current_time.minute < CHECK_INTERVAL_MINUTES:
             print("🕚 Время итогов дня...")
             await post_daily_summary()
-            await asyncio.sleep(60)  # подождать минуту, чтобы не дублировать
+            await asyncio.sleep(60)
             continue
 
-        # если не активные часы — спим
+        # ночью не публикуем
         if not is_active_hours():
             print("🌙 Ночь — бот спит до утра...")
             await asyncio.sleep(CHECK_INTERVAL_MINUTES * 60)
             continue
 
-        # обычный парсинг
         print("🔄 Проверяем новые новости...")
         articles = await fetch_latest_articles()
 
@@ -83,7 +82,6 @@ async def main_loop():
                 if not gpt:
                     continue
 
-                # публикуем в Telegram
                 await post_to_telegram(
                     gpt_title=gpt["title"],
                     link=article["link"],
@@ -91,8 +89,11 @@ async def main_loop():
                     image_url=article.get("image_url"),
                 )
 
-                # добавляем заголовок в список итогов
                 daily_titles.append(gpt["title"])
+
+                delay = random.randint(*POST_DELAY_RANGE)
+                print(f"⏳ Ждём {delay} сек перед следующим постом...")
+                await asyncio.sleep(delay)
 
         print(f"💤 Спим {CHECK_INTERVAL_MINUTES} минут...\n")
         await asyncio.sleep(CHECK_INTERVAL_MINUTES * 60)
