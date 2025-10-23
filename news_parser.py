@@ -6,10 +6,10 @@ from readability import Document
 from urllib.parse import urljoin
 
 SOURCES = [
-    "https://crypto.news/feed",
     "https://www.coindesk.com/arc/outboundfeeds/rss",
 ]
 HEADERS = {"User-Agent": "Mozilla/5.0 (compatible; NewsParser/1.0)"}
+
 
 def load_seen():
     try:
@@ -18,9 +18,11 @@ def load_seen():
     except Exception:
         return set()
 
+
 def save_seen(seen):
     with open("storage.json", "w", encoding="utf-8") as f:
         json.dump(list(seen), f, ensure_ascii=False, indent=2)
+
 
 async def fetch_text_from_url(session, url: str) -> tuple[str, str | None]:
     """Возвращает (plain_text, image_url_or_none) для статьи."""
@@ -59,21 +61,23 @@ async def fetch_text_from_url(session, url: str) -> tuple[str, str | None]:
 
     return text, image_url
 
+
 def _image_from_entry(entry) -> str | None:
     """Достаём картинку из RSS entry."""
-    # media:content / media:thumbnail
     try:
         if hasattr(entry, "media_content") and entry.media_content:
             for mc in entry.media_content:
                 url = mc.get("url")
-                if url: return url
+                if url:
+                    return url
         if hasattr(entry, "media_thumbnail") and entry.media_thumbnail:
             for mt in entry.media_thumbnail:
                 url = mt.get("url")
-                if url: return url
+                if url:
+                    return url
     except Exception:
         pass
-    # enclosures
+
     try:
         if hasattr(entry, "enclosures") and entry.enclosures:
             for enc in entry.enclosures:
@@ -83,7 +87,23 @@ def _image_from_entry(entry) -> str | None:
                     return url
     except Exception:
         pass
+
     return None
+
+
+def _is_markets_entry(entry) -> bool:
+    """Проверяет, относится ли новость к категории 'Markets'."""
+    try:
+        categories = []
+        if hasattr(entry, "tags"):
+            categories = [t.term.lower() for t in entry.tags if hasattr(t, "term")]
+        elif hasattr(entry, "category"):
+            categories = [entry.category.lower()]
+        # Смотрим на наличие слова 'markets' в списке
+        return any("markets" in c for c in categories)
+    except Exception:
+        return False
+
 
 async def fetch_latest_articles():
     """[{title, link, content, image_url}]"""
@@ -97,6 +117,9 @@ async def fetch_latest_articles():
                 feed = feedparser.parse(data)
 
                 for entry in feed.entries:
+                    if not _is_markets_entry(entry):
+                        continue  # ❌ Пропускаем не-Market статьи
+
                     link = getattr(entry, "link", None)
                     if not link or link in seen:
                         continue
